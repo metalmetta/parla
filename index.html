@@ -44,6 +44,20 @@
             background-color: white;
             border-radius: 5px;
         }
+        .reply {
+            margin-left: 20px;
+            border-left: 2px solid #ccc;
+            padding-left: 10px;
+        }
+        .reply-button {
+            background-color: #f0f0f0;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .replies {
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -65,6 +79,7 @@
 
     <script>
         let currentChannel = 'general';
+        let replyingTo = null;
 
         function changeChannel(channel) {
             currentChannel = channel;
@@ -73,21 +88,51 @@
         }
 
         function fetchMessages() {
-            axios.get(`http://localhost:5000/messages/${currentChannel}`)
+            axios.get(`/messages/${currentChannel}`)
                 .then(response => {
                     const messagesDiv = document.getElementById('messages');
                     messagesDiv.innerHTML = '';
                     response.data.forEach(message => {
-                        messagesDiv.innerHTML += `
-                            <div class="message">
-                                <strong>${message.user}</strong> (${new Date(message.timestamp).toLocaleString()}):
-                                <br>${message.content}
-                            </div>
-                        `;
+                        messagesDiv.innerHTML += createMessageHTML(message);
                     });
                     messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 })
                 .catch(error => console.error('Error:', error));
+        }
+
+        function createMessageHTML(message) {
+            return `
+                <div class="message" id="message-${message.id}">
+                    <strong>${message.user}</strong> (${new Date(message.timestamp).toLocaleString()}):
+                    <br>${message.content}
+                    <br><button class="reply-button" onclick="toggleReply(${message.id})">Reply</button>
+                    ${message.has_replies ? `<button class="reply-button" onclick="toggleReplies(${message.id})">Show Replies</button>` : ''}
+                    <div id="replies-${message.id}" class="replies" style="display: none;"></div>
+                </div>
+            `;
+        }
+
+        function toggleReply(messageId) {
+            replyingTo = replyingTo === messageId ? null : messageId;
+            document.getElementById('message').placeholder = replyingTo 
+                ? `Replying to message ${replyingTo}...` 
+                : 'Type a message...';
+        }
+
+        function toggleReplies(messageId) {
+            const repliesDiv = document.getElementById(`replies-${messageId}`);
+            if (repliesDiv.style.display === 'none') {
+                axios.get(`/messages/${messageId}/replies`)
+                    .then(response => {
+                        repliesDiv.innerHTML = response.data.map(reply => 
+                            `<div class="reply">${createMessageHTML(reply)}</div>`
+                        ).join('');
+                        repliesDiv.style.display = 'block';
+                    })
+                    .catch(error => console.error('Error:', error));
+            } else {
+                repliesDiv.style.display = 'none';
+            }
         }
 
         function sendMessage() {
@@ -99,14 +144,25 @@
                 return;
             }
 
-            axios.post('http://localhost:5000/messages', {
+            const messageData = {
                 user: username,
                 content: content,
                 channel: currentChannel
-            })
+            };
+
+            if (replyingTo) {
+                messageData.parent_id = replyingTo;
+            }
+
+            axios.post('/messages', messageData)
             .then(() => {
                 document.getElementById('message').value = '';
-                fetchMessages();
+                if (replyingTo) {
+                    toggleReplies(replyingTo);
+                    toggleReply(null);
+                } else {
+                    fetchMessages();
+                }
             })
             .catch(error => console.error('Error:', error));
         }
