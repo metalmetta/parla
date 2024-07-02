@@ -22,6 +22,14 @@ class Message(db.Model):
     parent_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=True)
     replies = db.relationship('Message', backref=db.backref('parent', remote_side=[id]))
 
+# Reaction model
+class Reaction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=False)
+    user = db.Column(db.String(80), nullable=False)
+    emoji = db.Column(db.String(10), nullable=False)
+    message = db.relationship('Message', backref=db.backref('reactions', lazy='dynamic'))
+
 # Create tables
 with app.app_context():
     db.create_all()
@@ -53,6 +61,28 @@ def get_replies(message_id):
     replies = Message.query.filter_by(parent_id=message_id).order_by(Message.timestamp).all()
     return jsonify([message_to_dict(reply) for reply in replies])
 
+@app.route('/messages/<int:message_id>/react', methods=['POST'])
+def add_reaction(message_id):
+    data = request.json
+    existing_reaction = Reaction.query.filter_by(
+        message_id=message_id,
+        user=data['user'],
+        emoji=data['emoji']
+    ).first()
+
+    if existing_reaction:
+        db.session.delete(existing_reaction)
+    else:
+        new_reaction = Reaction(
+            message_id=message_id,
+            user=data['user'],
+            emoji=data['emoji']
+        )
+        db.session.add(new_reaction)
+
+    db.session.commit()
+    return jsonify({"message": "Reaction updated successfully"}), 200
+
 def message_to_dict(message):
     return {
         "id": message.id,
@@ -61,7 +91,8 @@ def message_to_dict(message):
         "timestamp": message.timestamp.isoformat(),
         "channel": message.channel,
         "has_replies": bool(message.replies),
-        "parent_id": message.parent_id
+        "parent_id": message.parent_id,
+        "reactions": [{"user": r.user, "emoji": r.emoji} for r in message.reactions]
     }
 
 if __name__ == '__main__':

@@ -5,19 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Corporate Messaging Platform</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://twemoji.maxcdn.com/v/latest/twemoji.min.js" crossorigin="anonymous"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Inter', sans-serif;
             margin: 0;
             padding: 0;
             display: flex;
             height: 100vh;
+            background: linear-gradient(135deg, #FFA500, #FF4500);
+            color: #333;
         }
         #sidebar {
             width: 200px;
-            background-color: #2c2c2c;
+            background-color: rgba(44, 44, 44, 0.8);
             color: white;
             padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
         }
         #main {
             flex-grow: 1;
@@ -28,35 +33,79 @@
             flex-grow: 1;
             overflow-y: auto;
             padding: 20px;
-            background-color: #f5f5f5;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            margin: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
         #input-area {
             padding: 20px;
-            background-color: #e0e0e0;
+            background-color: rgba(224, 224, 224, 0.9);
+            border-radius: 10px;
+            margin: 0 20px 20px;
         }
+        
         input, button {
             padding: 10px;
             margin-right: 10px;
+            border: none;
+            border-radius: 5px;
+        }
+        input {
+            background-color: white;
+        }
+        button {
+            background-color: #FFA500;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #FF4500;
         }
         .message {
             margin-bottom: 10px;
             padding: 10px;
             background-color: white;
             border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .reply {
             margin-left: 20px;
-            border-left: 2px solid #ccc;
+            border-left: 2px solid #FFA500;
             padding-left: 10px;
         }
-        .reply-button {
+        .reply-button, .emoji-button {
             background-color: #f0f0f0;
             border: none;
             padding: 5px 10px;
             cursor: pointer;
+            margin-right: 5px;
         }
         .replies {
             margin-top: 10px;
+        }
+        .emoji-picker {
+            display: none;
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            z-index: 1000;
+        }
+        .emoji {
+            cursor: pointer;
+            font-size: 1.2em;
+            margin: 2px;
+        }
+        .reaction {
+            display: inline-block;
+            margin-right: 5px;
+            background-color: #f0f0f0;
+            border-radius: 20px;
+            padding: 2px 8px;
+            font-size: 0.9em;
         }
     </style>
 </head>
@@ -73,16 +122,20 @@
         <div id="input-area">
             <input type="text" id="username" placeholder="Your name">
             <input type="text" id="message" placeholder="Type a message...">
+            <button onclick="toggleEmojiPicker()">😀</button>
             <button onclick="sendMessage()">Send</button>
         </div>
     </div>
+    <div id="emoji-picker" class="emoji-picker"></div>
 
-    <script>
+<script>
         let currentChannel = 'general';
         let replyingTo = null;
+        let openThreads = new Set();
 
         function changeChannel(channel) {
             currentChannel = channel;
+            openThreads.clear();
             document.getElementById('messages').innerHTML = '';
             fetchMessages();
         }
@@ -95,18 +148,29 @@
                     response.data.forEach(message => {
                         messagesDiv.innerHTML += createMessageHTML(message);
                     });
+                    openThreads.forEach(messageId => {
+                        toggleReplies(messageId, true);
+                    });
                     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                    twemoji.parse(document.body);
                 })
                 .catch(error => console.error('Error:', error));
         }
 
         function createMessageHTML(message) {
+            const reactionsHTML = message.reactions.map(reaction => 
+                `<span class="reaction">${reaction.emoji} ${reaction.user}</span>`
+            ).join('');
+
             return `
                 <div class="message" id="message-${message.id}">
                     <strong>${message.user}</strong> (${new Date(message.timestamp).toLocaleString()}):
                     <br>${message.content}
-                    <br><button class="reply-button" onclick="toggleReply(${message.id})">Reply</button>
+                    <br>
+                    <button class="reply-button" onclick="toggleReply(${message.id})">Reply</button>
+                    <button class="emoji-button" onclick="toggleEmojiPicker(${message.id})">😀</button>
                     ${message.has_replies ? `<button class="reply-button" onclick="toggleReplies(${message.id})">Show Replies</button>` : ''}
+                    <div class="reactions">${reactionsHTML}</div>
                     <div id="replies-${message.id}" class="replies" style="display: none;"></div>
                 </div>
             `;
@@ -119,19 +183,22 @@
                 : 'Type a message...';
         }
 
-        function toggleReplies(messageId) {
+        function toggleReplies(messageId, forceOpen = false) {
             const repliesDiv = document.getElementById(`replies-${messageId}`);
-            if (repliesDiv.style.display === 'none') {
+            if (repliesDiv.style.display === 'none' || forceOpen) {
                 axios.get(`/messages/${messageId}/replies`)
                     .then(response => {
                         repliesDiv.innerHTML = response.data.map(reply => 
                             `<div class="reply">${createMessageHTML(reply)}</div>`
                         ).join('');
                         repliesDiv.style.display = 'block';
+                        openThreads.add(messageId);
+                        twemoji.parse(repliesDiv);
                     })
                     .catch(error => console.error('Error:', error));
             } else {
                 repliesDiv.style.display = 'none';
+                openThreads.delete(messageId);
             }
         }
 
@@ -158,7 +225,7 @@
             .then(() => {
                 document.getElementById('message').value = '';
                 if (replyingTo) {
-                    toggleReplies(replyingTo);
+                    toggleReplies(replyingTo, true);
                     toggleReply(null);
                 } else {
                     fetchMessages();
@@ -167,11 +234,63 @@
             .catch(error => console.error('Error:', error));
         }
 
+        function toggleEmojiPicker(messageId = null) {
+            const emojiPicker = document.getElementById('emoji-picker');
+            if (emojiPicker.style.display === 'none' || emojiPicker.style.display === '') {
+                emojiPicker.style.display = 'block';
+                emojiPicker.innerHTML = '';
+                const emojis = ['😀', '😂', '😍', '🥳', '😎', '🤔', '👍', '👎', '❤️', '🎉'];
+                emojis.forEach(emoji => {
+                    const span = document.createElement('span');
+                    span.className = 'emoji';
+                    span.textContent = emoji;
+                    span.onclick = () => addEmoji(emoji, messageId);
+                    emojiPicker.appendChild(span);
+                });
+                const rect = event.target.getBoundingClientRect();
+                emojiPicker.style.top = `${rect.bottom + window.scrollY}px`;
+                emojiPicker.style.left = `${rect.left + window.scrollX}px`;
+            } else {
+                emojiPicker.style.display = 'none';
+            }
+        }
+
+        function addEmoji(emoji, messageId) {
+            const username = document.getElementById('username').value;
+            if (!username) {
+                alert('Please enter your username before reacting');
+                return;
+            }
+
+            if (messageId) {
+                axios.post(`/messages/${messageId}/react`, { user: username, emoji: emoji })
+                    .then(() => {
+                        fetchMessages();
+                    })
+                    .catch(error => console.error('Error:', error));
+            } else {
+                const messageInput = document.getElementById('message');
+                messageInput.value += emoji;
+                messageInput.focus();
+            }
+            toggleEmojiPicker();
+        }
+
         // Fetch messages every 5 seconds
         setInterval(fetchMessages, 5000);
 
         // Initial fetch
         fetchMessages();
+
+        // Close emoji picker when clicking outside
+        document.addEventListener('click', function(event) {
+            const emojiPicker = document.getElementById('emoji-picker');
+            if (event.target.closest('.emoji-button') || event.target.closest('.emoji-picker')) return;
+            emojiPicker.style.display = 'none';
+        });
+
+        // Initialize Twemoji
+        twemoji.parse(document.body);
     </script>
 </body>
 </html>
